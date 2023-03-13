@@ -16,7 +16,7 @@ class PositionWiseFeedForward(nn.Module):
         self.layers = nn.Sequential(
             nn.Linear(self.embedding_dimension, self.intermediate_dimension),
             nn.GELU(),
-            nn.Linear(self.embedding_dimension, self.intermediate_dimension),
+            nn.Linear(self.intermediate_dimension, self.embedding_dimension),
             nn.Dropout(self.dropout_p),
         )
 

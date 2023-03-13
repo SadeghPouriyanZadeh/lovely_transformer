@@ -1,7 +1,7 @@
 from .attention import MultiHeadAttention
 from .feedforward import PositionWiseFeedForward
 import torch
-from torch import nn
+from torch import nn, Tensor
 
 
 class EncoderLayer(nn.Module):
@@ -9,7 +9,7 @@ class EncoderLayer(nn.Module):
         self,
         embedding_dimension,
         number_of_heads,
-        feed_forward_intermediate_dimnesion,
+        feed_forward_intermediate_dimension,
         attention_dropout_p,
         feed_forward_dropout_p,
     ) -> None:
@@ -25,7 +25,7 @@ class EncoderLayer(nn.Module):
         )
         self.feed_forward = PositionWiseFeedForward(
             embedding_dimension,
-            feed_forward_intermediate_dimnesion,
+            feed_forward_intermediate_dimension,
             feed_forward_dropout_p,
         )
 
@@ -39,13 +39,26 @@ class EncoderLayer(nn.Module):
         return embeddings
 
 
+def get_shifted_right_attention_mask(sequence_length: int) -> torch.Tensor:
+    return torch.ones((sequence_length, sequence_length), dtype=torch.bool).tril_(
+        diagonal=0
+    )
+
+
+class CausalLayer(EncoderLayer):
+    def forward(self, embeddings: Tensor):
+        batch_size, sequence_length, embedding_dimension = embeddings.shape
+        mask = get_shifted_right_attention_mask(sequence_length).to(embeddings.device)
+        return super().forward(embeddings, mask=mask)
+
+
 class DecoderLayer(nn.Module):
     def __init__(
         self,
         encoder_embedding_dimension,
         decoder_embedding_dimension,
         number_of_heads,
-        feed_forward_intermediate_dimnesion,
+        feed_forward_intermediate_dimension,
         attention_dropout_p,
         feed_forward_dropout_p,
     ) -> None:
@@ -72,7 +85,7 @@ class DecoderLayer(nn.Module):
 
         self.feed_forward = PositionWiseFeedForward(
             decoder_embedding_dimension,
-            feed_forward_intermediate_dimnesion,
+            feed_forward_intermediate_dimension,
             feed_forward_dropout_p,
         )
 
@@ -90,3 +103,23 @@ class DecoderLayer(nn.Module):
 
         embeddings = self.feed_forward(self.layer_norm_3(embeddings)) + embeddings
         return embeddings
+
+
+class LearnablePositionalEncoder(nn.Module):
+    def __init__(self, max_sequence_length: int, embedding_dimension: int) -> None:
+        super().__init__()
+        self.max_sequence_length = max_sequence_length
+        self.embedding_dimension = embedding_dimension
+        self.embedding = nn.Embedding(max_sequence_length, embedding_dimension)
+
+    def forward(self, embeddings: Tensor) -> Tensor:
+        batch_size, sequence_length, embedding_dimension = embeddings.shape
+        positions = torch.arange(
+            sequence_length, dtype=torch.long, device=embeddings.device
+        ).unsqueeze(0)
+        return self.embedding(positions) + embeddings
+
+
+class TokenEmbedder(nn.Embedding):
+    def __init__(self, vocabulary_size, embedding_dimension) -> None:
+        super().__init__(vocabulary_size, embedding_dimension)

@@ -41,7 +41,7 @@ class ScaledDotProductAttention(nn.Module):
             Tensor: (B, S1, E2)
         """
         dim_k = key.shape[2]
-        scores = torch.bmm(query, key.transpose(1, 2)) / (dim_k) ** 0.5
+        scores = torch.bmm(query, key.transpose(1, 2)) / (dim_k ** 0.5)
         if mask is not None:
             scores = scores.masked_fill(mask == False, float("-inf"))
         weights = torch.softmax(scores, dim=2)
@@ -68,14 +68,19 @@ class AttentionHead(nn.Module):
             queries_and_keys_projection_dimension
         )
         self.values_projection_dimension = values_projection_dimension
+        self.attention_dropout_p = attention_dropout_p
 
         self.queries_projection = nn.Linear(
             self.queries_embedding_dimension,
-            self.queries_and_keys_embedding_dimension,
+            self.queries_and_keys_projection_dimension,
         )
         self.keys_projection = nn.Linear(
             self.keys_embedding_dimension,
-            self.queries_and_keys_embedding_dimension,
+            self.queries_and_keys_projection_dimension,
+        )
+        self.values_projection = nn.Linear(
+            self.values_embedding_dimension,
+            self.values_projection_dimension,
         )
         self.scaled_dot_product_attention = ScaledDotProductAttention(
             attention_dropout_p
@@ -109,8 +114,8 @@ class AttentionHead(nn.Module):
             Tensor: (B, S1, E4)
         """
         projected_queries = self.queries_projection(query)
-        projected_keys = self.queries_projection(key)
-        projected_values = self.queries_projection(value)
+        projected_keys = self.keys_projection(key)
+        projected_values = self.values_projection(value)
         attention = self.scaled_dot_product_attention(
             projected_queries, projected_keys, projected_values, mask
         )
@@ -149,16 +154,16 @@ class MultiHeadAttention(nn.Module):
         for _ in range(self.number_of_heads):
             self.heads.append(
                 AttentionHead(
-                    self.queries_embedding_dimension,
-                    self.keys_embedding_dimension,
-                    self.values_embedding_dimension,
-                    self.head_queries_and_keys_projection_dimension,
-                    self.head_values_projection_dimension,
-                    self.attention_dropout_p,
+                    queries_embedding_dimension=self.queries_embedding_dimension,
+                    keys_embedding_dimension=self.keys_embedding_dimension,
+                    values_embedding_dimension=self.values_embedding_dimension,
+                    queries_and_keys_projection_dimension=self.head_queries_and_keys_projection_dimension,
+                    values_projection_dimension=self.head_values_projection_dimension,
+                    attention_dropout_p=self.attention_dropout_p,
                 )
             )
         self.output_projection = nn.Linear(
-            self.number_of_heads @ self.head_values_projection_dimension,
+            self.number_of_heads * self.head_values_projection_dimension,
             self.values_projection_dimension,
         )
 
@@ -171,10 +176,12 @@ class MultiHeadAttention(nn.Module):
     ):
         head_outputs = [h(query, key, value, mask) for h in self.heads]
         concatenated_outputs = torch.cat(head_outputs, dim=2)
+        output = self.output_projection(concatenated_outputs)
+        return output
 
 
 class SelfAttentionHead(AttentionHead):
-    def __init__(self, embedding_dimension, attention_dropout_p: float = 0) -> None:
+    def __init__(self, embedding_dimension, attention_dropout_p: float = 0.0) -> None:
         super().__init__(
             embedding_dimension,
             embedding_dimension,
