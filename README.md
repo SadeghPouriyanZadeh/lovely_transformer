@@ -1,0 +1,3 @@
+# lovely_transformer
+
+a package contatining transformers architecture and use cases like name generation, news generation, ...
